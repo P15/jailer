@@ -1,9 +1,0 @@
-# tables to be excluded when building model
-
-table-name;
-
-DEPENDENCY
-ENTITY
-ENTITY_GRAPH
-ENTITY_SET_ELEMENT
-

@@ -1,4 +1,0 @@
-# the employee named 'SCOTT' and all associated entities
-
-subject;            condition;               limit;       restrictions
-EMPLOYEE;           NAME='SCOTT';                 ; 
