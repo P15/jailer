@@ -1,4 +1,8 @@
 # subject; condition;  limit; restrictions
-null; ; ; .embedded
+EMPLOYEE; NAME='SCOTT'; ; .embedded
 
 # from A (or association name); to B; restriction-condition
+X; ; dsdsdsd
+DEPARTMENT; EMPLOYEE; ignore
+SUBORDINATE; ; neu
+SALARYGRADE; EMPLOYEE; ignore
