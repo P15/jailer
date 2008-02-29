@@ -1,0 +1,4 @@
+# subject; condition;  limit; restrictions
+klein; ; ; .embedded
+
+# from A (or association name); to B; restriction-condition
