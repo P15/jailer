@@ -16,34 +16,46 @@
 
 package net.sf.jailer.database;
 
-import net.sf.jailer.aliases.DatabaseAlias;
-import org.apache.log4j.Logger;
-
-import java.io.*;
-import java.sql.*;
-import java.text.MessageFormat;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.Driver;
+import java.sql.DriverManager;
+import java.sql.DriverPropertyInfo;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Properties;
+
+import org.apache.log4j.Logger;
 
 /**
  * Executes SQL-Statements.
  * Holds connections to the database on a 'per thread' basis.
  * 
  * @author Wisser
- * @author Vladimir "Dair T'arg" Bekutov
  */
 public class StatementExecutor {
 
     /**
      * Hold a connection for each thread.
      */
-    private final ThreadLocal<Connection> myConnection = new ThreadLocal<Connection>();
+    private final ThreadLocal<Connection> connection = new ThreadLocal<Connection>();
     
     /**
      * Holds all connections.
      */
-    private final Collection<Connection> myConnections = Collections.synchronizedCollection(new ArrayList<Connection>());
+    private final Collection<Connection> connections = Collections.synchronizedCollection(new ArrayList<Connection>());
     
     /**
      * Reads a JDBC-result-set.
@@ -54,7 +66,6 @@ public class StatementExecutor {
          * Reads current row of a result-set.
          * 
          * @param resultSet the result-set
-		 * @throws SQLException If the reading has been executed with errors.
          */
         void readCurrentRow(ResultSet resultSet) throws SQLException;
 
@@ -79,108 +90,139 @@ public class StatementExecutor {
     /**
      * The logger.
      */
-    private static final Logger myLog = Logger.getLogger("sql");
+    private static final Logger _log = Logger.getLogger("sql");
+ 
+    /**
+     * Connection factory.
+     */
+    private interface ConnectionFactory {
+        Connection getConnection() throws SQLException;
+    };
+    
+    /**
+     * Connection factory.
+     */
+    private final ConnectionFactory connectionFactory;
 
-	/**
+    /**
      * The DB schema name.
      */
     private final String schemaName;
 
-	/**
+    /**
+     * The DB URL.
+     */
+    public final String dbUrl;
+    
+    /**
+     * The DB user.
+     */
+    public final String dbUser;
+    
+    /**
+     * The DB password.
+     */
+    public final String dbPassword;
+
+    /**
      * Optional schema for introspection.
      */
     private String introspectionSchema;
     
     /**
-     * Constructs {@code StatementExecutor} for executing statements at
-	 * specified DB-server with specified DB-driver and authorizes using
-	 * specified DB-username and DB-password.
-     * 
-     * @param driverClass name of driver class
-     * @param host The database host URL
-     * @param user The DB-user
-     * @param password The DB-password
-	 *
-	 * @throws Exception
+     * Classloader to load Jdbc-Driver with.
      */
-    public StatementExecutor(String driverClass, final String host, final String user, final String password)
-	throws Exception {
-		// todo: replace with locale string
-		myLog.info("connecting to db-server at " + host + " with user " + user + ";");
-		myDatabaseAlias = new DatabaseAlias(host, user, password);
+    public static ClassLoader classLoaderForJdbcDriver = null;
+    
+    /**
+     * Wraps a Jdbc-Driver.
+     */
+    public static class DriverShim implements Driver {
+        private Driver driver;
+        public DriverShim(Driver d) {
+            this.driver = d;
+        }
+        public boolean acceptsURL(String u) throws SQLException {
+            return this.driver.acceptsURL(u);
+        }
+        public Connection connect(String u, Properties p) throws SQLException {
+            return this.driver.connect(u, p);
+        }
+        public int getMajorVersion() {
+            return this.driver.getMajorVersion();
+        }
+        public int getMinorVersion() {
+            return this.driver.getMinorVersion();
+        }
+        public DriverPropertyInfo[] getPropertyInfo(String u, Properties p) throws SQLException {
+            return this.driver.getPropertyInfo(u, p);
+        }
+        public boolean jdbcCompliant() {
+            return this.driver.jdbcCompliant();
+        }
+    }
+
+    /**
+     * Constructor.
+     * 
+     * @param driverClassName name of JDBC-driver class
+     * @param dbUrl the database URL
+     * @param user the DB-user
+     * @param password the DB-password
+     */
+    public StatementExecutor(String driverClassName, final String dbUrl, final String user, final String password) throws Exception {
+        _log.info("connect to user " + user + " at "+ dbUrl);
+        if (classLoaderForJdbcDriver != null) {
+            Driver d = (Driver)Class.forName(driverClassName, true, classLoaderForJdbcDriver).newInstance();
+            DriverManager.registerDriver(new DriverShim(d));
+        } else {
+            Class.forName(driverClassName);
+        }
         this.schemaName = user;
-        Connection connection = getConnection();
-	    logDriverInfo(connection);
-	}
-	
-	/**
-	 * Logs driver info
-	 * 
-	 * @param connection connection to DB
-	 */
-	private void logDriverInfo(Connection connection) {
+        this.dbUrl = dbUrl;
+        this.dbUser = user;
+        this.dbPassword = password;
+        connectionFactory = new ConnectionFactory() {
+            public Connection getConnection() throws SQLException {
+                Connection con = connection.get();
+                
+                if (con == null) {
+                    con = DriverManager.getConnection(dbUrl, user, password);
+                    con.setAutoCommit(true);
+                    try {
+                        con.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
+                    } catch (SQLException e) {
+                        _log.info("can't set isolation level to UR. Reason: " + e.getMessage());
+                    }
+                    connection.set(con);
+                    connections.add(con);
+                }
+                return con;
+            }
+        };
+        // fail fast
+        Connection connection = connectionFactory.getConnection();
+        logDriverInfo(connection);
+    }
+
+    /**
+     * Logs driver info
+     * 
+     * @param connection connection to DB
+     */
+    private void logDriverInfo(Connection connection) {
 		try {
 			DatabaseMetaData meta = connection.getMetaData();
-			myLog.info("driver name:    " + meta.getDriverName());
-			myLog.info("driver version: " + meta.getDriverVersion());
-			myLog.info("DB name:        " + meta.getDatabaseProductName());
-			myLog.info("DB version:     " + meta.getDatabaseProductVersion());
+			_log.info("driver name:    " + meta.getDriverName());
+			_log.info("driver version: " + meta.getDriverVersion());
+			_log.info("DB name:        " + meta.getDatabaseProductName());
+			_log.info("DB version:     " + meta.getDatabaseProductVersion());
 		} catch (Exception e) {
 			// ignore exceptions
 		}
 	}
 
-	///////////////////////////
-	// Default DB server url //
-	///////////////////////////
-
-    /**
-     * The database alias.
-     */
-    private final DatabaseAlias myDatabaseAlias;
-    
-	//private String myHost;
-
 	/**
-	 * Returns a sql-server host.
-	 *
-	 * @return A sql-server host.
-	 */
-	public String getHost() {
-		return myDatabaseAlias.getURL();
-	}
-
-	//////////////////////
-	// Default username //
-	//////////////////////
-
-	//private String myUsername;
-
-	/**
-	 * Returns a username.
-	 *
-	 * @return A username.
-	 */
-	public String getUsername() {
-		return myDatabaseAlias.getUser();
-	}
-
-	//////////////////////
-	// Default password //
-	//////////////////////
-
-	//private String myPassword;
-
-	/**
-	 * Returns a password.
-	 *
-	 * @return A password.
-	 */
-	public String getPassword() {
-		return myDatabaseAlias.getPassword();
-	}
-
-    /**
      * Gets DB schema name.
      * 
      * @return DB schema name
@@ -196,8 +238,8 @@ public class StatementExecutor {
      * @param reader the reader for the result
      */
     public void executeQuery(String sqlQuery, ResultSetReader reader) throws SQLException {
-        myLog.debug(sqlQuery);
-        Statement statement = getConnection().createStatement();
+        _log.debug(sqlQuery);
+        Statement statement = connectionFactory.getConnection().createStatement();
         ResultSet resultSet = statement.executeQuery(sqlQuery);
         while (resultSet.next()) {
             reader.readCurrentRow(resultSet);
@@ -240,11 +282,11 @@ public class StatementExecutor {
      * Executes a SQL-Update (INSERT, DELETE or UPDATE).
      * 
      * @param sqlUpdate the update in SQL
+     * 
      * @return update-count
-	 * @throws SQLException
      */
     public int executeUpdate(String sqlUpdate) throws SQLException {
-        myLog.debug(sqlUpdate);
+        _log.debug(sqlUpdate);
         int rowCount = 0;
         int failures = 0;
         boolean ok = false;
@@ -252,7 +294,7 @@ public class StatementExecutor {
         while (!ok) {
             Statement statement = null;
             try {
-                statement = getConnection().createStatement();
+                statement = connectionFactory.getConnection().createStatement();
                 if (serializeAccess) {
                     synchronized (DB_LOCK) {
                         rowCount = statement.executeUpdate(sqlUpdate);
@@ -261,15 +303,14 @@ public class StatementExecutor {
                     rowCount = statement.executeUpdate(sqlUpdate);
                 }
                 ok = true;
-                myLog.debug(MessageFormat.format("{0} row(s) affected", rowCount));
+                _log.debug("" + rowCount + " row(s)");
             } catch (SQLException e) {
-				// todo: replace '-911' sql-error with an appropriate constant.
-				if (++failures > myMaxFailures || e.getErrorCode() != -911) {
+                if (++failures > 10 || e.getErrorCode() != -911) {
                     throw e;
                 }
                 // deadlock
                 serializeAccess = true;
-                myLog.info("Deadlock! Try again.");
+                _log.info("Deadlock! Try again.");
             } finally {
                 if (statement != null) {
                     statement.close();
@@ -281,17 +322,12 @@ public class StatementExecutor {
     
     /**
      * Inserts a CLob.
-	 *
-	 * @param table
-	 * @param column
-	 * @param where
-	 * @param lobFile
-	 */
+     */
     public void insertClob(String table, String column, String where, File lobFile) throws SQLException, FileNotFoundException {
     	String sqlUpdate = "Update " + table + " set " + column + "=? where " + where;
-        myLog.debug(sqlUpdate);
+        _log.debug(sqlUpdate);
         PreparedStatement statement = null;
-        statement = getConnection().prepareStatement(sqlUpdate);
+        statement = connectionFactory.getConnection().prepareStatement(sqlUpdate);
         statement.setCharacterStream(1, new InputStreamReader(new FileInputStream(lobFile)), (int) lobFile.length());
         statement.execute();
         statement.close();
@@ -299,17 +335,12 @@ public class StatementExecutor {
 
     /**
      * Inserts a BLob.
-	 *
-	 * @param table
-	 * @param column
-	 * @param where
-	 * @param lobFile
      */
     public void insertBlob(String table, String column, String where, File lobFile) throws SQLException, FileNotFoundException {
     	String sqlUpdate = "Update " + table + " set " + column + "=? where " + where;
-        myLog.debug(sqlUpdate);
+        _log.debug(sqlUpdate);
         PreparedStatement statement = null;
-        statement = getConnection().prepareStatement(sqlUpdate);
+        statement = connectionFactory.getConnection().prepareStatement(sqlUpdate);
         statement.setBinaryStream(1, new FileInputStream(lobFile), (int) lobFile.length());
         statement.execute();
         statement.close();
@@ -321,8 +352,8 @@ public class StatementExecutor {
      * @param sql the SQL-Statement
      */
     public void execute(String sql) throws SQLException {
-        myLog.debug(sql);
-        Statement statement = getConnection().createStatement();
+        _log.debug(sql);
+        Statement statement = connectionFactory.getConnection().createStatement();
         statement.execute(sql);
         statement.close();
     }
@@ -333,16 +364,25 @@ public class StatementExecutor {
      * @return DB meta data
      */
     public DatabaseMetaData getMetaData() throws SQLException {
-        Connection connection = getConnection();
+        Connection connection = connectionFactory.getConnection();
         return connection.getMetaData();
     }
 
     /**
+     * Sets Classloader to load Jdbc-Driver with.
+     * 
+     * @param classLoader Classloader to load Jdbc-Driver with
+     */
+    public static void setClassLoaderForJdbcDriver(ClassLoader classLoader) {
+        classLoaderForJdbcDriver = classLoader;
+    }
+    
+
+    /**
      * Closes all connections.
-	 * @throws java.sql.SQLException
-	 */
+     */
     public void shutDown() throws SQLException {
-        for (Connection con: myConnections) {
+        for (Connection con: connections) {
             con.close();
         }
     }
@@ -364,71 +404,5 @@ public class StatementExecutor {
     public void setIntrospectionSchema(String introspectionSchema) {
     	this.introspectionSchema = introspectionSchema;
     }
-
-	//////////////////////////
-	// Max Filures settings //
-	//////////////////////////
-
-	/**
-	 * A maximum number of failures that could occurs during exeution of one
-	 * query before an exception will be thrown out.
-	 *
-	 * The default value is 10.
-	 *
-	 * @see #getMaxFailures()
-	 * @see #setMaxFailures(int)
-	 */
-	protected int myMaxFailures = 10;
-
-	/**
-	 * Returns a maximum number of failures during query execution.
-	 *
-	 * @return A maximum number of failures during query execution.
-	 *
-	 * @see #setMaxFailures(int)
-	 */
-	public int getMaxFailures() {
-		return myMaxFailures;
-	}
-
-	/**
-	 * Sets a maximum number of failures during query execution.
-	 *
-	 * @param maxFailures A new maximum number of failures during query
-	 * execution.
-	 * @throws IllegalArgumentException If a received value is negative.
-	 *
-	 * @see #setMaxFailures(int)
-	 */
-	public void setMaxFailures(int maxFailures)
-	throws IllegalArgumentException {
-		if (maxFailures < 0) {
-			throw new IllegalArgumentException("The maximum number of failures should be positive value");
-		}
-		myMaxFailures = maxFailures;
-	}
-
-	/**
-	 * Returns a connection to a database server.
-	 *
-	 * @return A connection to a database server.
-	 * 
-	 * @throws SQLException If some SQL errors occured.
-	 */
-	public Connection getConnection()
-	throws SQLException {
-		Connection connection = myConnection.get();
-		if (connection == null) {
-			connection = myDatabaseAlias.getConnection();
-			connection.setAutoCommit(true);
-			try {
-				connection.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
-			} catch (SQLException e) {
-				myLog.info("can't set isolation level to UR. Reason: " + e.getMessage());
-			}
-			myConnection.set(connection);
-			myConnections.add(connection);
-		}
-		return connection;
-	}
+    
 }

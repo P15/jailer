@@ -16,11 +16,29 @@
 
 package net.sf.jailer;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.zip.GZIPOutputStream;
+
 import net.sf.jailer.database.DeletionReader;
 import net.sf.jailer.database.ExportReader;
 import net.sf.jailer.database.StatementExecutor;
-import net.sf.jailer.database.StatementExecutor.ResultSetReader;
 import net.sf.jailer.database.StatisticRenovator;
+import net.sf.jailer.database.StatementExecutor.ResultSetReader;
 import net.sf.jailer.datamodel.Association;
 import net.sf.jailer.datamodel.Cardinality;
 import net.sf.jailer.datamodel.DataModel;
@@ -32,22 +50,16 @@ import net.sf.jailer.extractionmodel.ExtractionModel;
 import net.sf.jailer.modelbuilder.ModelBuilder;
 import net.sf.jailer.render.DataModelRenderer;
 import net.sf.jailer.restrictionmodel.RestrictionModel;
-import net.sf.jailer.util.*;
+import net.sf.jailer.util.CsvFile;
+import net.sf.jailer.util.JobManager;
+import net.sf.jailer.util.PrintUtil;
+import net.sf.jailer.util.SqlScriptExecutor;
+import net.sf.jailer.util.SqlUtil;
+
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 import org.springframework.context.support.AbstractXmlApplicationContext;
 import org.springframework.context.support.FileSystemXmlApplicationContext;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.sql.SQLException;
-import java.util.*;
-import java.util.regex.Pattern;
-import java.util.zip.GZIPOutputStream;
 
 /**
  * Utility for extracting small consistent row-sets from
@@ -60,7 +72,7 @@ public class Jailer {
     /**
      * The Jailer version.
      */
-    public static final String VERSION = "2.1.5";
+    public static final String VERSION = "2.1.7";
     
     /**
      * The relational data model.
@@ -352,7 +364,7 @@ public class Jailer {
     /**
      * Writes entities into extract-SQL-script.
      * 
-     * @param scriptType the name of the sql-script to write the data to
+     * @param sqlScriptFile the name of the sql-script to write the data to
      * @param table write entities from this table only
      * @param result a writer for the extract-script
      */
@@ -503,7 +515,7 @@ public class Jailer {
             if (applicationContext.containsBean("statistic-renovator")) {
                 List<StatisticRenovator> statisticRenovators = (List<StatisticRenovator>) applicationContext.getBean("statistic-renovator");  
                 for (StatisticRenovator statisticRenovator: statisticRenovators) {
-                	if (Pattern.matches(statisticRenovator.getUrlPattern(), statementExecutor.getHost())) {
+                	if (Pattern.matches(statisticRenovator.getUrlPattern(), statementExecutor.dbUrl)) {
 		                _log.info("gather statistics after " + lastRunstats + " inserted rows...");
 		                try {
 		                	statisticRenovator.renew(statementExecutor);
