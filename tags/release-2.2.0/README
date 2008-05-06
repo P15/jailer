@@ -1,0 +1,9 @@
+Model-based Data Export Tool
+
+Extracts small consistent and referentially intact row-sets from your productive database 
+and imports the data into your development and test environment.
+Removes and archives obsolete data from your productive database. 
+
+Home:    http://jailer.sourceforge.net/
+Forum:   https://sourceforge.net/forum/?group_id=197260
+Support: rwisser@users.sourceforge.net
