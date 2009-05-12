@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:lang="http://www.springframework.org/schema/lang"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xsi:schemaLocation="
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.0.xsd
+http://www.springframework.org/schema/lang http://www.springframework.org/schema/lang/spring-lang-2.0.xsd
+http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-2.0.xsd">
+	
+	<!--
+		If minimize-UPK is true, the UPK don't preserve order. This minimizes
+		the size of the UPK.
+	-->
+	<bean name="minimize-UPK" class="java.lang.Boolean">
+		<!--
+			set value="true" if you use MySQL and get the following exception:
+			"java.sql.SQLException: Too many key parts specified; max 16 parts
+			allowed"
+		-->
+		<constructor-arg value="false" />
+	</bean>
+	<!--
+		Script-enhancer adds application specific extensions to generated
+		SQL-scripts
+	-->
+	<util:list id="script-enhancer">
+		<!--
+			Inserts the content of the files - prolog/[INSERT|DELETE]/<TABLE>.sql
+			- epilog/[INSERT|DELETE]/<TABLE>.sql at top/bottom of the generated
+			script for each table <TABLE> for which at least one row is
+			inserted/deleted.
+		-->
+		<bean class="net.sf.jailer.enhancer.FileBasedScriptEnhancer" />
+		<bean class="net.sf.jailer.enhancer.HelperTableEnhancer" />
+	</util:list>
+	<!--
+		Model-finder reads table- and association definitions from meta-data
+		sources
+	-->
+	<util:list id="model-finder">
+		<!--
+			<bean
+			class="net.sf.jailer.modelbuilder.DBMetaDataBasedModelElementFinder">
+			<constructor-arg value="script/db2/selectTables.sql"/>
+			<constructor-arg value="script/db2/selectAssociations.sql"/>
+			<constructor-arg value="script/db2/selectColumns.sql"/> </bean>
+		-->
+		<bean class="net.sf.jailer.modelbuilder.JDBCMetaDataBasedModelElementFinder" />
+	</util:list>
+	<bean name="renderer" class="net.sf.jailer.render.HtmlDataModelRenderer">
+		<constructor-arg value="render" />
+		<constructor-arg value="0" />
+	</bean>
+
+	<!-- DBMS configuration
+	-->
+	<util:list id="dbms-configuration">
+		
+		<!-- for Informix -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:informix.*" />
+			<property name="typeReplacement">
+				<map>
+					<entry key="datetime" value="datetime year to fraction"/>
+					<entry key="serial" value="int"/>
+					<entry key="serial8" value="int8"/>
+				</map>
+			</property>
+		</bean>
+
+		<!-- for IBM DB2 -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:db2.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/db2/update_statistics.sql" />
+				</bean>
+			</property>
+			<property name="emptyCLOBValue" value="clob('')" />
+			<property name="emptyBLOBValue" value="blob('')" />
+			<property name="sessionTemporaryTableManager">
+				<bean class="net.sf.jailer.database.DefaultTemporaryTableManager">
+					<property name="dmlTableReferencePrefix" value="SESSION." />
+					<property name="createTablePrefix" value="DECLARE GLOBAL TEMPORARY TABLE " />
+					<property name="createTableSuffix" value="ON COMMIT PRESERVE ROWS NOT LOGGED" />
+					<property name="createIndexPrefix" value="CREATE INDEX SESSION." />
+					<property name="createIndexSuffix" value="" />
+					<property name="indexTablePrefix" value="SESSION." />
+					<property name="dropTablePrefix" value="DROP TABLE SESSION." />
+				</bean>
+			</property>
+		</bean>
+
+		<!-- for Oracle -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:oracle.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/oracle/gatherStatistics.sql" />
+				</bean>
+			</property>
+			<property name="emptyCLOBValue" value="empty_clob()" />
+			<property name="emptyBLOBValue" value="empty_blob()" />
+			<property name="binaryPattern" value="hextoraw('%s')" />
+			<property name="useToTimestampFunction" value="true" />
+			<property name="sessionTemporaryTableManager">
+				<bean class="net.sf.jailer.database.DefaultTemporaryTableManager">
+					<property name="dmlTableReferencePrefix" value="" />
+					<property name="createTablePrefix" value="CREATE GLOBAL TEMPORARY TABLE " />
+					<property name="createTableSuffix" value="ON COMMIT PRESERVE ROWS" />
+					<property name="createIndexPrefix" value="CREATE INDEX " />
+					<property name="createIndexSuffix" value="" />
+					<property name="indexTablePrefix" value="" />
+					<property name="dropTablePrefix" value="DROP TABLE " />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for PostgreSQL -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:postgres.*" />
+			<property name="typeReplacement">
+				<map>
+					<entry key="bigserial" value="int8"/>
+					<entry key="serial8" value="int8"/>
+					<entry key="serial" value="int4"/>
+					<entry key="serial4" value="int4"/>
+				</map>
+			</property>
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/postgres/update_statistics.sql" />
+				</bean>
+			</property>
+
+			<property name="sessionTemporaryTableManager">
+				<bean class="net.sf.jailer.database.DefaultTemporaryTableManager">
+					<property name="dmlTableReferencePrefix" value="" />
+					<property name="createTablePrefix" value="CREATE TEMPORARY TABLE " />
+					<property name="createTableSuffix" value="" />
+					<property name="createIndexPrefix" value="CREATE INDEX " />
+					<property name="createIndexSuffix" value="" />
+					<property name="indexTablePrefix" value="" />
+					<property name="dropTablePrefix" value="-- DROP TABLE " />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for Cloudscape -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:cloudscape.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/cloudscape/update_statistics.sql" />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for Firebird -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:firebirdsql.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/firebird/update_statistics.sql" />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for MS SQL -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern"
+				value="jdbc:sqlserver.*|jdbc:inetdae.*|jdbc:JTurbo.*|jdbc:weblogic:mssqlserver.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/mssql/update_statistics.sql" />
+				</bean>
+			</property>
+			<property name="sessionTemporaryTableManager">
+				<bean class="net.sf.jailer.database.DefaultTemporaryTableManager">
+					<property name="dmlTableReferencePrefix" value="#" />
+					<property name="createTablePrefix" value="CREATE TABLE #" />
+					<property name="createTableSuffix" value="" />
+					<property name="createIndexPrefix" value="CREATE INDEX " />
+					<property name="createIndexSuffix" value="" />
+					<property name="indexTablePrefix" value="#" />
+					<property name="dropTablePrefix" value="DROP TABLE #" />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for MySQL -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:mysql.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/mysql/update_statistics.sql" />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for Derby -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:derby.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/derby/update_statistics.sql" />
+				</bean>
+			</property>
+		</bean>
+		
+		<!-- for Sybase -->
+		<bean class="net.sf.jailer.Configuration">
+			<property name="urlPattern" value="jdbc:sybase.*" />
+			<property name="statisticRenovator">
+				<bean class="net.sf.jailer.database.SqlScriptBasedStatisticRenovator">
+					<constructor-arg value="script/sybase/update_statistics.sql" />
+				</bean>
+			</property>
+			<property name="sessionTemporaryTableManager">
+				<bean class="net.sf.jailer.database.DefaultTemporaryTableManager">
+					<property name="dmlTableReferencePrefix" value="#" />
+					<property name="createTablePrefix" value="CREATE TABLE #" />
+					<property name="createTableSuffix" value="" />
+					<property name="createIndexPrefix" value="CREATE INDEX " />
+					<property name="createIndexSuffix" value="" />
+					<property name="indexTablePrefix" value="#" />
+					<property name="dropTablePrefix" value="DROP TABLE #" />
+				</bean>
+			</property>
+		</bean>
+	</util:list>
+</beans>
