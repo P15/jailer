@@ -2,7 +2,7 @@
 
 instdir=`dirname $0`
 cd $instdir
- 
+
 LIB=lib
 CP=.:out:out/classes:out/jailer.jar
 
@@ -21,4 +21,4 @@ CP=$CP:$LIB/spring.jar
 CP=$CP:$LIB/sdoc-0.5.0-beta.jar
 CP=$CP:jailer.jar
 
-java -Xmx1024M -cp $CP net.sf.jailer.Jailer "$@"
+java -Xmx24G -cp $CP net.sf.jailer.Jailer "$@"

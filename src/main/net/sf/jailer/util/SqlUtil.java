@@ -46,7 +46,7 @@ import net.sf.jailer.entitygraph.EntityGraph;
  * @author Ralf Wisser
  */
 public class SqlUtil {
-    
+
     /**
      * Change alias A to B and B to A in a SQL-condition.
      * 
@@ -316,6 +316,9 @@ public class SqlUtil {
         if (content instanceof HStoreWrapper) {
             return "'" + Configuration.forDbms(session).convertToStringLiteral(content.toString()) + "'::hstore";
         }
+		if (content instanceof PGCustomWrapper) {
+			return "'" + Configuration.forDbms(session).convertToStringLiteral(content.toString()) + "'";
+		}
         if (content instanceof byte[]) {
         	byte[] data = (byte[]) content;
         	StringBuilder hex = new StringBuilder((data.length + 1) * 2);
@@ -382,7 +385,8 @@ public class SqlUtil {
     }
     
     private static final int TYPE_HSTORE = 10500;
-    
+    private static final int TYPE_PGCUSTOM = 10501;
+
     static class HStoreWrapper {
         private final String value;
         public HStoreWrapper(String value) {
@@ -392,6 +396,16 @@ public class SqlUtil {
             return value;
         }
     }
+
+	static class PGCustomWrapper {
+		private final String value;
+		public PGCustomWrapper(String value) {
+			this.value = value;
+		}
+		public String toString() {
+			return value;
+		}
+	}
 
     static class NCharWrapper {
         private final String value;
@@ -426,6 +440,9 @@ public class SqlUtil {
 	                if ("hstore".equalsIgnoreCase(typeName)) {
 	                    type = TYPE_HSTORE;
 	                }
+					if ("daterange".equalsIgnoreCase(typeName) || "citext".equalsIgnoreCase(typeName) || "interval".equalsIgnoreCase(typeName) || "json".equalsIgnoreCase(typeName)) {
+						type = TYPE_PGCUSTOM;
+					}
 	             }
 				 // workaround for JDTS bug
 				 if (type == Types.VARCHAR) {
@@ -477,7 +494,9 @@ public class SqlUtil {
 		if (dbms == DBMS.POSTGRESQL) {
 			if (type == TYPE_HSTORE) {
 				return new HStoreWrapper(resultSet.getString(i));
-            } else if (object instanceof Boolean) {
+            } else if (type == TYPE_PGCUSTOM) {
+				return new PGCustomWrapper(resultSet.getString(i));
+			} else if (object instanceof Boolean) {
 				String typeName = resultSetMetaData.getColumnTypeName(i);
 				if (typeName != null && typeName.toLowerCase().equals("bit")) {
 					final String value = Boolean.TRUE.equals(object)? "B'1'" : "B'0'";
