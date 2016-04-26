@@ -15,23 +15,6 @@
  */
 package net.sf.jailer.util;
 
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
-import java.sql.Time;
-import java.sql.Timestamp;
-import java.sql.Types;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-
 import net.sf.jailer.Configuration;
 import net.sf.jailer.database.DBMS;
 import net.sf.jailer.database.SQLDialect;
@@ -39,6 +22,12 @@ import net.sf.jailer.database.Session;
 import net.sf.jailer.datamodel.DataModel;
 import net.sf.jailer.datamodel.Table;
 import net.sf.jailer.entitygraph.EntityGraph;
+
+import java.sql.*;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.Date;
 
 /**
  * Some utility methods.
@@ -261,7 +250,6 @@ public class SqlUtil {
         }
 
         Configuration c = Configuration.forDbms(session);
-		
         if (content instanceof java.sql.Date) {
         	if (c.useToTimestampFunction) {
         		String format;
@@ -417,6 +405,9 @@ public class SqlUtil {
         }
     }
 
+//	Taken from the PGStatement class of the postgres jdbc driver
+	public static final long PG_DATE_POSITIVE_INFINITY = 9223372036825200000l;
+
     /**
      * Gets object from result-set.
      * 
@@ -478,6 +469,10 @@ public class SqlUtil {
 						}
 						return result;
 					}
+				} else if (dbms == DBMS.POSTGRESQL) {
+					if (resultSet.getDate(i).getTime() == PG_DATE_POSITIVE_INFINITY) {
+						return new PGCustomWrapper("infinity");
+					}
 				}
 				Date date = resultSet.getDate(i);
 				return date;
@@ -496,6 +491,8 @@ public class SqlUtil {
 				return new HStoreWrapper(resultSet.getString(i));
             } else if (type == TYPE_PGCUSTOM) {
 				return new PGCustomWrapper(resultSet.getString(i));
+			} else if (type == Types.DOUBLE && Double.isNaN(resultSet.getDouble(i))) {
+				return new PGCustomWrapper("NaN");
 			} else if (object instanceof Boolean) {
 				String typeName = resultSetMetaData.getColumnTypeName(i);
 				if (typeName != null && typeName.toLowerCase().equals("bit")) {
