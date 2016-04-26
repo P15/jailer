@@ -470,7 +470,7 @@ public class SqlUtil {
 						return result;
 					}
 				} else if (dbms == DBMS.POSTGRESQL) {
-					if (resultSet.getDate(i).getTime() == PG_DATE_POSITIVE_INFINITY) {
+					if (resultSet.getDate(i) != null && resultSet.getDate(i).getTime() == PG_DATE_POSITIVE_INFINITY) {
 						return new PGCustomWrapper("infinity");
 					}
 				}
