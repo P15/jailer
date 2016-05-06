@@ -15,50 +15,9 @@
  */
 package net.sf.jailer;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.StringReader;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.nio.charset.Charset;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.zip.GZIPOutputStream;
-
-import javax.xml.transform.sax.TransformerHandler;
-import javax.xml.transform.stream.StreamResult;
-
-import net.sf.jailer.database.DMLTransformer;
-import net.sf.jailer.database.DeletionTransformer;
-import net.sf.jailer.database.Session;
+import net.sf.jailer.database.*;
 import net.sf.jailer.database.Session.ResultSetReader;
-import net.sf.jailer.database.StatisticRenovator;
-import net.sf.jailer.database.TemporaryTableScope;
-import net.sf.jailer.datamodel.AggregationSchema;
-import net.sf.jailer.datamodel.Association;
-import net.sf.jailer.datamodel.Cardinality;
-import net.sf.jailer.datamodel.Column;
-import net.sf.jailer.datamodel.DataModel;
-import net.sf.jailer.datamodel.ParameterHandler;
-import net.sf.jailer.datamodel.Table;
+import net.sf.jailer.datamodel.*;
 import net.sf.jailer.dbunit.FlatXMLTransformer;
 import net.sf.jailer.domainmodel.DomainModel;
 import net.sf.jailer.enhancer.ScriptEnhancer;
@@ -72,21 +31,23 @@ import net.sf.jailer.progress.ProgressListener;
 import net.sf.jailer.progress.ProgressListenerRegistry;
 import net.sf.jailer.render.DataModelRenderer;
 import net.sf.jailer.restrictionmodel.RestrictionModel;
-import net.sf.jailer.util.CancellationException;
-import net.sf.jailer.util.CancellationHandler;
-import net.sf.jailer.util.ClasspathUtil;
-import net.sf.jailer.util.CsvFile;
-import net.sf.jailer.util.CycleFinder;
-import net.sf.jailer.util.JobManager;
-import net.sf.jailer.util.PrintUtil;
-import net.sf.jailer.util.SqlScriptExecutor;
-import net.sf.jailer.util.SqlUtil;
+import net.sf.jailer.util.*;
 import net.sf.jailer.xml.XmlExportTransformer;
 import net.sf.jailer.xml.XmlUtil;
-
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 import org.xml.sax.helpers.AttributesImpl;
+
+import javax.xml.transform.sax.TransformerHandler;
+import javax.xml.transform.stream.StreamResult;
+import java.io.*;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.*;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Tool for database subsetting, schema browsing, and rendering. It exports
@@ -208,13 +169,14 @@ public class Jailer {
 	 */
 	public Set<Table> export(Table table, String condition, Collection<Table> progressOfYesterday, long limit) throws Exception {
 		_log.info("exporting " + datamodel.getDisplayName(table) + " Where " + condition.replace('\n', ' ').replace('\r', ' '));
-		int today = entityGraph.getAge();
-		entityGraph.setAge(today + 1);
+		int today = 0;
+		entityGraph.setAge(today);
+		entityGraph.setBirthdayOfSubject(today);
 		Map<Table, Collection<Association>> progress = new HashMap<Table, Collection<Association>>();
-		ProgressListenerRegistry.getProgressListener().collectionJobEnqueued(1, table);
-		ProgressListenerRegistry.getProgressListener().collectionJobStarted(1, table);
+		ProgressListenerRegistry.getProgressListener().collectionJobEnqueued(today, table);
+		ProgressListenerRegistry.getProgressListener().collectionJobStarted(today, table);
 		long rc = entityGraph.addEntities(table, condition, today, limit);
-		ProgressListenerRegistry.getProgressListener().collected(1, table, rc);
+		ProgressListenerRegistry.getProgressListener().collected(today, table, rc);
 		if (rc > 0) {
 			progress.put(table, new ArrayList<Association>());
 		}
@@ -271,21 +233,18 @@ public class Jailer {
 	 * @param subject
 	 *            the subject of the extraction-model
 	 */
-	private Set<Table> exportInitialData(Table subject) throws Exception {
-		Set<Table> idTables = initialDataTables;
-		Set<Table> tables = new HashSet<Table>();
-		for (Table table : idTables) {
+	private Set<Table> exportInitialData() throws Exception {
+		Set<Table> tables = initialDataTables;
+		for (Table table : tables) {
 			/* if (subject.closure(true).contains(table)) */ {
 				// since 3.4.10 initial-data tables always will be exported
-				tables.add(table);
 				_log.info("exporting all " + datamodel.getDisplayName(table));
 
-				int today = entityGraph.getAge();
-				ProgressListenerRegistry.getProgressListener().collectionJobEnqueued(1, table);
-				ProgressListenerRegistry.getProgressListener().collectionJobStarted(1, table);
+				int today = 0;
+				ProgressListenerRegistry.getProgressListener().collectionJobEnqueued(today, table);
+				ProgressListenerRegistry.getProgressListener().collectionJobStarted(today, table);
 				long rc = entityGraph.addEntities(table, "1=1", today, 0);
-				ProgressListenerRegistry.getProgressListener().collected(1, table, rc);
-				entityGraph.setAge(today + 1);
+				ProgressListenerRegistry.getProgressListener().collected(today, table, rc);
 //			} else {
 //				_log.info(datamodel.getDisplayName(table) + " not in closure(" + datamodel.getDisplayName(subject) + ")");
 			}
@@ -1281,8 +1240,7 @@ public class Jailer {
 			jailer.readInitialDataTables(CommandLineParser.getInstance().getSourceSchemaMapping(), extractionModel.subject);
 			jailer.runstats(false);
 			ProgressListenerRegistry.getProgressListener().newStage("collecting rows", false, false);
-			Set<Table> progress = jailer.exportInitialData(extractionModel.subject);
-			entityGraph.setBirthdayOfSubject(entityGraph.getAge());
+			Set<Table> progress = jailer.exportInitialData();
 			progress.addAll(jailer.export(extractionModel.subject, extractionModel.condition, progress, extractionModel.limit));
 			totalProgress.addAll(progress);
 			subjects.add(extractionModel.subject);
